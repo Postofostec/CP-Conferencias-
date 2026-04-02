@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard Cartões - Cloud</title>
+    <link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        :root{--bg:#0d0f14;--surface:#161921;--surface2:#1e2230;--border:#2a2f3d;--accent:#4f8ef7;--accent2:#38d9a9;--danger:#ff6b6b;--warn:#ffd43b;--text:#e8eaf0;--text2:#8b93a8;--green:#51cf66;--font:'Sora',sans-serif;--mono:'JetBrains Mono',monospace;}
+        *{box-sizing:border-box;margin:0;padding:0;}
+        body{background:var(--bg);color:var(--text);font-family:var(--font);min-height:100vh;}
+
+        /* Login */
+        #loginScreen{position:fixed;inset:0;background:var(--bg);z-index:9999;display:flex;align-items:center;justify-content:center;}
+        .login-box{background:var(--surface);border:1px solid var(--border);border-radius:18px;padding:40px;width:360px;text-align:center;}
+        .login-field{margin-bottom:14px;text-align:left;}
+        .login-field label{display:block;font-size:11px;color:var(--text2);font-weight:600;margin-bottom:5px;text-transform:uppercase;}
+        .login-field input{width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:9px;color:var(--text);padding:10px;outline:none;}
+        .login-btn{width:100%;padding:11px;background:var(--accent);color:#fff;border:none;border-radius:9px;font-weight:600;cursor:pointer;}
+
+        /* Header */
+        header{background:var(--surface);border-bottom:1px solid var(--border);padding:13px 22px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;}
+        .user-pill{background:var(--surface2); border:1px solid var(--border); padding:5px 15px; border-radius:20px; font-size:12px; cursor:pointer;}
+
+        /* Tabela */
+        .controls{padding:20px; display:flex; gap:10px; align-items:center;}
+        .sheet-wrap{margin:0 20px; background:var(--surface); border:1px solid var(--border); border-radius:11px; overflow:hidden;}
+        .sheet-scroll{overflow-x:auto;}
+        .sheet-table{border-collapse:collapse; width:max-content; min-width:100%;}
+        .sheet-table th, .sheet-table td{border:1px solid var(--border); padding:8px; text-align:center;}
+        .rh{background:var(--surface2); font-size:11px; color:var(--text2); width:50px;}
+        .ch{background:var(--surface2); font-size:10px; text-transform:uppercase; color:var(--text2); min-width:110px;}
+        .ic input{width:100%; background:transparent; border:none; color:white; text-align:right; font-family:var(--mono); outline:none;}
+        
+        .btn{padding:8px 16px; border-radius:8px; border:none; cursor:pointer; font-weight:600; font-size:12px;}
+        .btn-add{background:var(--green); color:#000;}
+        .btn-del{background:var(--danger); color:#fff;}
+        .btn-save{background:var(--accent); color:#fff; margin-left:auto;}
+        
+        .footer-names{background:var(--surface2); font-weight:bold; font-size:9px; color:var(--accent);}
+        .total-row{background:rgba(79, 142, 247, 0.1); font-weight:bold;}
+    </style>
+</head>
+<body>
+
+<div id="loginScreen">
+    <div class="login-box">
+        <h2>Acesso Postos</h2>
+        <div class="login-field"><label>E-mail</label><input type="text" id="loginUser" placeholder="admin ou posto@email.com"></div>
+        <div class="login-field"><label>Senha</label><input type="password" id="loginPass"></div>
+        <button class="login-btn" onclick="doLogin()">Entrar</button>
+    </div>
+</div>
+
+<header id="appHeader" style="display:none;">
+    <h1>⛽ Dashboard Cloud</h1>
+    <div class="user-pill" onclick="location.reload()">Sair</div>
+</header>
+
+<main id="appMain" style="display:none;">
+    <div class="controls">
+        <button class="btn btn-add" onclick="addRow()">+ Linha</button>
+        <button class="btn btn-del" onclick="removeRow()">x Remover</button>
+        <button class="btn btn-save" onclick="syncSave()">💾 Salvar na Nuvem</button>
+    </div>
+
+    <div class="sheet-wrap">
+        <div class="sheet-scroll">
+            <table class="sheet-table">
+                <thead id="sheetHead"></thead>
+                <tbody id="sheetBody"></tbody>
+                <tfoot id="sheetFoot"></tfoot>
+            </table>
+        </div>
+    </div>
+</main>
+
+<script>
+// --- CONFIGURAÇÃO SUPABASE ---
+const SUPABASE_URL = 'https://hphntpplzvwktwxrnpfm.supabase.co'; 
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhwaG50cHBsenZ3a3R3eHJucGZtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUxMzkxMzEsImV4cCI6MjA5MDcxNTEzMX0.gXAn0zKRWucLLaBcXj1mOaKfG_9jJeCnnxIByHoURI4';
+const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+let currentUser = null;
+const BANDEIRAS=['Elo Crédito','Elo Débito','Maestro','Mastercard','Visa Crédito','Visa Electron','American','PIX','Gasola','Goodcard','Alelo','Vale Card','eFleet','X7','Truckpag','Rede Frota','Expers','Brasil Card','Vegas'];
+
+async function doLogin() {
+    const user = document.getElementById('loginUser').value;
+    const pass = document.getElementById('loginPass').value;
+
+    // Login Master Admin
+    if(user === 'admin' && pass === 'Brandao123') {
+        alert("Painel Admin Master em breve..."); return;
+    }
+
+    const { data, error } = await supabase.auth.signInWithPassword({ email: user, password: pass });
+    if (error) return alert("Erro no login");
+    
+    currentUser = data.user;
+    showApp();
+}
+
+function showApp() {
+    document.getElementById('loginScreen').style.display = 'none';
+    document.getElementById('appHeader').style.display = 'flex';
+    document.getElementById('appMain').style.display = 'block';
+    renderHeader();
+    loadFromCloud();
+}
+
+function renderHeader() {
+    let h = '<tr><th class="rh">#</th>';
+    BANDEIRAS.forEach(b => h += `<th class="ch">${b}</th>`);
+    document.getElementById('sheetHead').innerHTML = h + '</tr>';
+}
+
+function addRow(values = null) {
+    const body = document.getElementById('sheetBody');
+    const rowIdx = body.children.length + 1;
+    const tr = document.createElement('tr');
+    let h = `<td class="rh">${rowIdx}</td>`;
+    BANDEIRAS.forEach((_, i) => {
+        const val = values ? values[i] : '';
+        h += `<td class="ic"><input type="text" data-col="${i}" value="${val}" oninput="calcTotals()"></td>`;
+    });
+    tr.innerHTML = h;
+    body.appendChild(tr);
+    renderFooter();
+}
+
+function removeRow() {
+    const body = document.getElementById('sheetBody');
+    if(body.children.length > 1) {
+        body.removeChild(body.lastChild);
+        renderFooter();
+    }
+}
+
+function renderFooter() {
+    const foot = document.getElementById('sheetFoot');
+    // Linha de Nomes (Títulos)
+    let hNames = '<tr class="footer-names"><td class="rh">Nomes</td>';
+    BANDEIRAS.forEach(b => hNames += `<td>${b}</td>`);
+    
+    // Linha de Totais
+    let hTotals = '<tr class="total-row"><td class="rh">TOTAL</td>';
+    BANDEIRAS.forEach((_, i) => hTotals += `<td><input type="text" id="total-${i}" readonly style="width:100%; border:none; background:transparent; color:var(--accent2); text-align:right; font-weight:bold;"></td>`);
+    
+    foot.innerHTML = hNames + '</tr>' + hTotals + '</tr>';
+    calcTotals();
+}
+
+function calcTotals() {
+    BANDEIRAS.forEach((_, colIdx) => {
+        let sum = 0;
+        document.querySelectorAll(`#sheetBody input[data-col="${colIdx}"]`).forEach(input => {
+            let v = input.value.replace(',','.');
+            sum += parseFloat(v) || 0;
+        });
+        const out = document.getElementById(`total-${colIdx}`);
+        if(out) out.value = sum.toLocaleString('pt-BR', {minimumFractionDigits: 2});
+    });
+}
+
+async function syncSave() {
+    const rows = [];
+    document.querySelectorAll('#sheetBody tr').forEach(tr => {
+        const row = [];
+        tr.querySelectorAll('input').forEach(i => row.push(i.value));
+        rows.push(row);
+    });
+
+    const { error } = await supabase.from('dados_postos').upsert({ 
+        user_id: currentUser.id, 
+        tipo_dado: 'calculadora', 
+        conteudo: rows 
+    }, { onConflict: 'user_id, tipo_dado' });
+
+    alert(error ? "Erro ao salvar" : "✅ Salvo com sucesso!");
+}
+
+async function loadFromCloud() {
+    const { data } = await supabase.from('dados_postos').select('conteudo')
+        .eq('user_id', currentUser.id).eq('tipo_dado', 'calculadora').single();
+
+    const body = document.getElementById('sheetBody');
+    body.innerHTML = "";
+    if (data && data.conteudo) {
+        data.conteudo.forEach(rowData => addRow(rowData));
+    } else {
+        for(let i=0; i<5; i++) addRow();
+    }
+}
+</script>
+</body>
+</html>
